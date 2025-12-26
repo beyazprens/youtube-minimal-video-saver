@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         YouTube Minimal Video Saver 2.0
+// @name         YouTube Minimal Video Saver
 // @namespace    https://github.com/Beyazprens/youtube-minimal-video-saver
 // @version      2.0.0
 // @description  Saves video progress, shows aesthetic in-player notifications, and provides a modern management UI.
