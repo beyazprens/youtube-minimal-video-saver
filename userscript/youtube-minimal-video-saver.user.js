@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         YouTube Minimal Video Saver
 // @namespace    https://github.com/Beyazprens/youtube-minimal-video-saver
-// @version      2.0.1
-// @description  Saves video progress, shows aesthetic in-player notifications, and provides a modern management UI.
+// @version      2.1.0
+// @description  Video ilerlemesini kaydeder, player içinde estetik bildirim gösterir.
 // @author       Beyazprens
 // @match        https://www.youtube.com/*
 // @license      MIT
@@ -27,50 +27,32 @@
         MIN_DURATION: 60
     };
 
-    let video = null;
-    let videoId = null;
-    let lastSave = 0;
+    // Global değişkenler (Önceki dinleyicileri temizlemek için şart)
+    let currentVideoElement = null;
+    let timeUpdateListener = null;
+    let lastSaveTime = 0;
+    let currentVideoId = null;
 
+    // --- CSS STYLES ---
     GM_addStyle(`
+        /* Toast Notification */
         .yms-toast {
-            position: absolute;
-            bottom: 70px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: rgba(0, 0, 0, 0.85);
-            border-left: 4px solid #ff0000;
-            color: #fff;
-            padding: 10px 20px;
-            border-radius: 4px;
-            font-family: 'Roboto', 'Arial', sans-serif;
-            font-size: 14px;
-            font-weight: 500;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            opacity: 0;
-            pointer-events: none;
-            z-index: 60;
-            transition: opacity 0.6s ease-in-out;
-            backdrop-filter: blur(2px);
-            box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+            position: absolute; bottom: 70px; left: 50%; transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.85); border-left: 4px solid #ff0000; color: #fff;
+            padding: 10px 20px; border-radius: 4px; font-family: 'Roboto', sans-serif;
+            font-size: 14px; font-weight: 500; display: flex; align-items: center; gap: 10px;
+            opacity: 0; pointer-events: none; z-index: 60; transition: opacity 0.6s ease-in-out;
+            backdrop-filter: blur(2px); box-shadow: 0 4px 10px rgba(0,0,0,0.5);
         }
-        .yms-toast.show {
-            opacity: 1;
-        }
-        .yms-toast svg {
-            fill: #ff0000;
-            filter: drop-shadow(0 0 5px rgba(255,0,0,0.6));
-        }
+        .yms-toast.show { opacity: 1; }
+        .yms-toast svg { fill: #ff0000; filter: drop-shadow(0 0 5px rgba(255,0,0,0.6)); }
+
+        /* Modal UI */
         #yms-modal {
-            position: fixed; top: 0; left: 0;
-            width: 100%; height: 100%;
-            background: rgba(0, 0, 0, 0.7);
-            backdrop-filter: blur(5px);
-            z-index: 9999;
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0, 0, 0, 0.7); backdrop-filter: blur(5px); z-index: 9999;
             display: flex; justify-content: center; align-items: center;
-            font-family: 'Roboto', sans-serif;
-            opacity: 0; transition: opacity 0.3s ease; pointer-events: none;
+            font-family: 'Roboto', sans-serif; opacity: 0; transition: opacity 0.3s ease; pointer-events: none;
         }
         #yms-modal.open { opacity: 1; pointer-events: auto; }
         .yms-window {
@@ -87,7 +69,6 @@
         .yms-list { overflow-y: auto; padding: 10px; flex-grow: 1; }
         .yms-list::-webkit-scrollbar { width: 8px; }
         .yms-list::-webkit-scrollbar-thumb { background: #444; border-radius: 4px; }
-        .yms-list::-webkit-scrollbar-track { background: #1f1f1f; }
         .yms-item { display: flex; gap: 15px; padding: 12px; margin-bottom: 8px; background: #2a2a2a; border-radius: 12px; transition: background 0.2s; position: relative; }
         .yms-item:hover { background: #333; }
         .yms-thumb { width: 120px; height: 68px; border-radius: 8px; object-fit: cover; background: #000; }
@@ -97,7 +78,7 @@
         .yms-progress-bar { height: 4px; background: #444; border-radius: 2px; width: 100%; margin-top: 8px; overflow: hidden; }
         .yms-progress-fill { height: 100%; background: #ff0000; }
         .yms-actions { display: flex; flex-direction: column; justify-content: center; gap: 5px; }
-        .yms-btn-del { background: rgba(255, 69, 58, 0.1); color: #ff453a; border: none; padding: 8px; border-radius: 8px; cursor: pointer; transition: all 0.2s; }
+        .yms-btn-del { background: rgba(255, 69, 58, 0.1); color: #ff453a; border: none; padding: 8px; border-radius: 8px; cursor: pointer; }
         .yms-btn-del:hover { background: rgba(255, 69, 58, 0.2); }
         .yms-footer { padding: 15px; border-top: 1px solid #333; text-align: right; background: #282828; }
         .yms-clear-btn { background: transparent; color: #aaa; border: 1px solid #444; padding: 8px 16px; border-radius: 18px; cursor: pointer; font-size: 13px; transition: all 0.2s; }
@@ -105,25 +86,44 @@
         .yms-empty { text-align: center; padding: 40px; color: #666; font-style: italic; }
     `);
 
+    // --- MAIN LOGIC ---
+
+    // Navigasyon bittiğinde (yeni sayfa yüklendiğinde) çalışır
     window.addEventListener("yt-navigate-finish", init, false);
     init();
 
     function init() {
+        // Önceki videodan kalan dinleyicileri temizle (Hata düzeltmesi)
+        cleanup();
+
         if (location.pathname.includes('/shorts/')) return;
 
         const params = new URLSearchParams(location.search);
-        videoId = params.get("v");
-        if (!videoId) return;
+        currentVideoId = params.get("v");
+        if (!currentVideoId) return;
 
-        waitForVideo().then(v => {
-            video = v;
-            if (video.readyState >= 1) {
-                restore(videoId, video);
+        waitForVideo().then(videoEl => {
+            currentVideoElement = videoEl;
+
+            // Meta data yüklendiyse hemen, yüklenmediyse bekle
+            if (videoEl.readyState >= 1) {
+                restore(currentVideoId, videoEl);
             } else {
-                video.addEventListener('loadedmetadata', () => restore(videoId, video), { once: true });
+                videoEl.addEventListener('loadedmetadata', () => restore(currentVideoId, videoEl), { once: true });
             }
-            setupVideoEvents(videoId, video);
+
+            // Yeni dinleyiciyi tanımla ve kaydet
+            timeUpdateListener = () => handleTimeUpdate(videoEl);
+            videoEl.addEventListener("timeupdate", timeUpdateListener);
         });
+    }
+
+    function cleanup() {
+        if (currentVideoElement && timeUpdateListener) {
+            currentVideoElement.removeEventListener("timeupdate", timeUpdateListener);
+            timeUpdateListener = null;
+            currentVideoElement = null;
+        }
     }
 
     function waitForVideo() {
@@ -141,45 +141,47 @@
         });
     }
 
-    function setupVideoEvents(id, vid) {
-        vid.addEventListener("timeupdate", () => {
-            if (!vid.duration || !isFinite(vid.duration)) return;
-            if (vid.paused) return;
-            if (vid.duration < CONFIG.MIN_DURATION) return;
+    function handleTimeUpdate(vid) {
+        if (!vid.duration || !isFinite(vid.duration)) return;
+        if (vid.paused) return;
+        if (vid.duration < CONFIG.MIN_DURATION) return;
 
-            const percent = vid.currentTime / vid.duration;
+        const percent = vid.currentTime / vid.duration;
 
-            if (percent > CONFIG.DELETE_THRESHOLD) {
-                if (GM_getValue(CONFIG.PREFIX + id)) {
-                    GM_deleteValue(CONFIG.PREFIX + id);
-                }
-                return;
+        // %95 izlendiyse listeden sil
+        if (percent > CONFIG.DELETE_THRESHOLD) {
+            if (GM_getValue(CONFIG.PREFIX + currentVideoId)) {
+                GM_deleteValue(CONFIG.PREFIX + currentVideoId);
             }
+            return;
+        }
 
-            const now = Date.now();
-            if (now - lastSave > CONFIG.SAVE_INTERVAL && vid.currentTime > 5) {
-                save(id, vid.currentTime, vid.duration);
-                lastSave = now;
-            }
-        });
+        const now = Date.now();
+        // Belirli aralıklarla kaydet
+        if (now - lastSaveTime > CONFIG.SAVE_INTERVAL && vid.currentTime > 5) {
+            save(currentVideoId, vid.currentTime, vid.duration);
+            lastSaveTime = now;
+        }
     }
 
     function save(id, time, duration) {
+        // BAŞLIK DÜZELTMESİ: document.title yerine sayfadaki H1 elementini oku
+        // Bu sayede eski videonun başlığını alma hatası engellenir.
+        const titleEl = document.querySelector("ytd-watch-metadata h1") || document.querySelector("#title h1");
+        let title = titleEl ? titleEl.innerText : document.title;
+
+        // Temizleme işlemi
+        title = title.replace(/^\(\d+\)\s+/, "").replace(" - YouTube", "");
+
         const data = {
             id,
             time,
             duration,
-            title: getCleanTitle(),
+            title: title || "Unknown Video",
             thumbnail: `https://i.ytimg.com/vi/${id}/mqdefault.jpg`,
             date: Date.now()
         };
         GM_setValue(CONFIG.PREFIX + id, JSON.stringify(data));
-    }
-
-    function getCleanTitle() {
-        let title = document.title;
-        title = title.replace(/^\(\d+\)\s+/, "").replace(" - YouTube", "");
-        return title || "Unknown Video";
     }
 
     function restore(id, vid) {
@@ -189,6 +191,7 @@
         try {
             const data = JSON.parse(raw);
             if (!data.time) return;
+            // Eğer video önceden bitirilmişse geri yükleme
             if (vid.duration && data.time > vid.duration * CONFIG.DELETE_THRESHOLD) {
                 GM_deleteValue(CONFIG.PREFIX + id);
                 return;
@@ -204,6 +207,8 @@
             console.error("Restore error:", e);
         }
     }
+
+    // --- UI FUNCTIONS ---
 
     GM_registerMenuCommand("📂 Manage Saved Videos", toggleUI);
 
@@ -221,13 +226,8 @@
             </svg>
             <span>${message}</span>
         `;
-
         playerContainer.appendChild(toast);
-
-        requestAnimationFrame(() => {
-            toast.classList.add('show');
-        });
-
+        requestAnimationFrame(() => toast.classList.add('show'));
         setTimeout(() => {
             toast.classList.remove('show');
             setTimeout(() => toast.remove(), 600);
@@ -264,10 +264,8 @@
             </div>
         `;
         document.body.appendChild(modal);
-
         modal.querySelector(".yms-close").onclick = () => modal.classList.remove("open");
         modal.onclick = (e) => { if (e.target === modal) modal.classList.remove("open"); };
-
         modal.querySelector(".yms-clear-btn").onclick = () => {
             if (confirm("Are you sure you want to delete all saved videos?")) {
                 const keys = GM_listValues().filter(k => k.startsWith(CONFIG.PREFIX));
@@ -315,7 +313,6 @@
                     <button class="yms-btn-del">🗑️</button>
                 </div>
             `;
-
             row.querySelector(".yms-btn-del").onclick = function() {
                 GM_deleteValue(CONFIG.PREFIX + item.id);
                 row.style.opacity = '0';
