@@ -27,13 +27,13 @@
         MIN_DURATION: 60
     };
 
-    // Global değişkenler (Önceki dinleyicileri temizlemek için şart)
+
     let currentVideoElement = null;
     let timeUpdateListener = null;
     let lastSaveTime = 0;
     let currentVideoId = null;
 
-    // --- CSS STYLES ---
+
     GM_addStyle(`
         /* Toast Notification */
         .yms-toast {
@@ -86,14 +86,11 @@
         .yms-empty { text-align: center; padding: 40px; color: #666; font-style: italic; }
     `);
 
-    // --- MAIN LOGIC ---
 
-    // Navigasyon bittiğinde (yeni sayfa yüklendiğinde) çalışır
     window.addEventListener("yt-navigate-finish", init, false);
     init();
 
     function init() {
-        // Önceki videodan kalan dinleyicileri temizle (Hata düzeltmesi)
         cleanup();
 
         if (location.pathname.includes('/shorts/')) return;
@@ -105,14 +102,12 @@
         waitForVideo().then(videoEl => {
             currentVideoElement = videoEl;
 
-            // Meta data yüklendiyse hemen, yüklenmediyse bekle
             if (videoEl.readyState >= 1) {
                 restore(currentVideoId, videoEl);
             } else {
                 videoEl.addEventListener('loadedmetadata', () => restore(currentVideoId, videoEl), { once: true });
             }
 
-            // Yeni dinleyiciyi tanımla ve kaydet
             timeUpdateListener = () => handleTimeUpdate(videoEl);
             videoEl.addEventListener("timeupdate", timeUpdateListener);
         });
@@ -148,7 +143,6 @@
 
         const percent = vid.currentTime / vid.duration;
 
-        // %95 izlendiyse listeden sil
         if (percent > CONFIG.DELETE_THRESHOLD) {
             if (GM_getValue(CONFIG.PREFIX + currentVideoId)) {
                 GM_deleteValue(CONFIG.PREFIX + currentVideoId);
@@ -157,7 +151,6 @@
         }
 
         const now = Date.now();
-        // Belirli aralıklarla kaydet
         if (now - lastSaveTime > CONFIG.SAVE_INTERVAL && vid.currentTime > 5) {
             save(currentVideoId, vid.currentTime, vid.duration);
             lastSaveTime = now;
@@ -165,12 +158,9 @@
     }
 
     function save(id, time, duration) {
-        // BAŞLIK DÜZELTMESİ: document.title yerine sayfadaki H1 elementini oku
-        // Bu sayede eski videonun başlığını alma hatası engellenir.
         const titleEl = document.querySelector("ytd-watch-metadata h1") || document.querySelector("#title h1");
         let title = titleEl ? titleEl.innerText : document.title;
 
-        // Temizleme işlemi
         title = title.replace(/^\(\d+\)\s+/, "").replace(" - YouTube", "");
 
         const data = {
@@ -191,7 +181,6 @@
         try {
             const data = JSON.parse(raw);
             if (!data.time) return;
-            // Eğer video önceden bitirilmişse geri yükleme
             if (vid.duration && data.time > vid.duration * CONFIG.DELETE_THRESHOLD) {
                 GM_deleteValue(CONFIG.PREFIX + id);
                 return;
@@ -208,7 +197,6 @@
         }
     }
 
-    // --- UI FUNCTIONS ---
 
     GM_registerMenuCommand("📂 Manage Saved Videos", toggleUI);
 
