@@ -2,7 +2,7 @@
 // @name         YouTube Minimal Video Saver
 // @namespace    https://github.com/Beyazprens/youtube-minimal-video-saver
 // @version      2.1.0
-// @description  Video ilerlemesini kaydeder, player içinde estetik bildirim gösterir.
+// @description  Records video progress, displays aesthetic notifications within the player.
 // @author       Beyazprens
 // @match        https://www.youtube.com/*
 // @license      MIT
